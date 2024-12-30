@@ -1,0 +1,352 @@
+#!/bin/bash
+
+LOG_SDATE=$2
+NPU_NUMBER=$(lspci | grep accelerators | wc -l)
+host_name=$(hostname)
+
+test_num=$1
+
+dv=$3
+
+echo "Now NPU Num is $NPU_NUMBER log_sdate = $LOG_SDATE"
+log_path="./mda_log/temp"
+if [ ! -d "$log_path" ]; then
+  echo "폴더가 존재하지 않습니다. 폴더를 생성합니다: $log_path"
+  mkdir -p "$log_path"
+else
+  echo "폴더가 이미 존재합니다: $log_path"
+fi
+
+
+# pip가 설치되었는지 확인
+if ! command -v pip &> /dev/null; then
+  echo "pip가 설치되어 있지 않습니다. 설치를 시도합니다."
+
+  # apt-get을 사용하여 python3-pip 설치
+  echo "python3-pip를 apt-get으로 설치합니다."
+  sudo apt-get update
+  sudo apt-get install -y python3-pip
+
+  # pip 설치 확인
+  if command -v pip &> /dev/null; then
+    echo "pip가 성공적으로 설치되었습니다."
+  else
+    echo "pip 설치에 실패했습니다."
+    exit 1
+  fi
+else
+  echo "pip가 이미 설치되어 있습니다."
+fi
+
+#########################################################################
+
+
+local_folder="./rsd"
+  
+
+
+# 폴더가 존재하지 않으면 생성
+if [ ! -d "$local_folder" ]; then
+  echo "폴더가 존재하지 않습니다. 폴더를 생성합니다: $local_folder"
+  mkdir -p "$local_folder"
+else
+  echo "폴더가 이미 존재합니다: $local_folder"
+fi
+
+# 필요한 파일들이 있는지 확인
+all_files_present=true
+for file in "${required_files[@]}"; do
+  if [ ! -f "$local_folder/$file" ]; then
+    echo "$file 파일이 없습니다."
+    all_files_present=false
+  else
+    echo "$file 파일이 존재합니다."
+  fi
+done
+
+# 파일이 없으면 원격지에서 복사
+if [ "$all_files_present" = false ]; then
+  echo "필요한 파일이 없습니다. 종료합니다.."
+  exit 0
+else
+  echo "모든 파일이 이미 존재합니다."
+fi
+
+MDA_FILE=($(ls ${local_folder}/*.bin))
+MDA_FILE_NUM=${#MDA_FILE[@]}
+
+########################################################################
+
+
+stage="None"
+
+if [ $NPU_NUMBER -lt 4 ]; then
+    echo "The NPU numbers is not enough"
+elif [ $NPU_NUMBER -lt 8 ]; then
+    echo "4mda"
+    stage="4mda"
+elif [ $NPU_NUMBER -lt 12 ]; then
+    echo "8mda"
+    stage="8mda"
+elif [ $NPU_NUMBER -lt 16 ]; then
+    echo "12mda"
+    stage="12mda"
+elif [ $NPU_NUMBER -lt 17 ]; then
+    echo "16mda"
+    stage="16mda"
+else
+    echo "Error"
+fi
+
+echo "stage = $stage"
+
+
+data_loging(){
+    local NPU_ID_LIST=$1
+    local file_name=$2
+    local pid=$3
+    base_file_name=$(basename "$file_name")
+    local IDS="${NPU_ID_LIST#*=}"  # 문자열에서 '=' 이후의 부분 추출
+    IFS=',' read -ra NUMBERS <<< "$IDS"  # 쉼표로 구분된 문자열을 배열로 분할
+
+    while ps -p $pid > /dev/null; do
+        for port in "${NUMBERS[@]}"; do
+            #echo "ID: $port"
+	    chip_info=$(rbln chip_info -d ${port} | awk '$1 == "Chip" {print $3}')
+	    FILE_PATH1="./result/${chip_info}_${test_num}_mda_test_log.csv"
+            FILE_PATH2="/home/jenkins/www/test_log/mda/${test_num}_${host_name}_${chip_info}_test_log.csv"
+            # 여기에 해당 ID에 대한 처리 추가
+            
+	    if [ -e $FILE_PATH1 ]; then
+        	#echo "$chip_info // data_loging."
+		time_stamp=$(date +"%Y-%m-%d %H:%M:%S:%3N")
+                time_start_stamp=$(date +"%S.%3N")
+
+                #Read rbln ver
+                rbln_ver=$(rbln ver -d ${port})
+ 
+                host_driver=$(echo "${rbln_ver}" | awk '$1 == "[Host" {print $3}')
+                fw_release=$(echo "${rbln_ver}" | awk '$1 == "[FW" {print $3}')
+                smc_version=$(echo "${rbln_ver}" | awk '$1 == "[SMC" {print $3}')
+
+                #Read rbln chip_info
+                chip_info=$(rbln chip_info -d ${port} | awk '$1 == "Chip" {print $3}')
+
+                #Read rbln temp
+                rbln_temp=$(rbln temp -d ${port})
+
+                temp_pek_t=$(echo "${rbln_temp}" | awk '$1 == "PEAK"{print $3}')
+
+                CA53_temp=$(echo "${rbln_temp}" | awk '$1 == "CA53"{print $3}')
+                DNC0_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC0"{print $3}')
+                DNC1_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC1"{print $3}')
+                DNC2_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC2"{print $3}')
+                DNC3_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC3"{print $3}')
+                DNC4_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC4"{print $3}')
+                DNC5_temp=$(echo "${rbln_temp}" | awk '$1 == "DNC5"{print $3}')
+                DRAM_temp=$(echo "${rbln_temp}" | awk '$1 == "DRAM"{print $3}')
+                PCIE_temp=$(echo "${rbln_temp}" | awk '$1 == "PCIE"{print $3}')
+                SHM_temp=$(echo "${rbln_temp}" | awk '$1 == "SHM"{print $3}')
+
+                #Read rbln pmic
+                rbln_pmic=$(rbln pmic -d ${port})
+
+                DNC_CORE_V=$(echo "${rbln_pmic}" | awk '$1 == "DNC" && $2 == "CORE"{print $4}')
+                DNC_CORE_A=$(echo "${rbln_pmic}" | awk '$1 == "DNC" && $2 == "CORE"{print $7}')
+                DNC_CORE_W=$(echo "${rbln_pmic}" | awk '$1 == "DNC" && $2 == "CORE"{print $10}')
+
+                PCIEA_V=$(echo "${rbln_pmic}" | awk '$1 == "PCIEA"{print $3}')
+                PCIEA_A=$(echo "${rbln_pmic}" | awk '$1 == "PCIEA"{print $6}')
+                PCIEA_W=$(echo "${rbln_pmic}" | awk '$1 == "PCIEA"{print $9}')
+
+                GDR_VDDQ_V=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "VDDQ"{print $4}')
+                GDR_VDDQ_A=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "VDDQ"{print $7}')
+                GDR_VDDQ_W=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "VDDQ"{print $10}')
+
+                GDR_CORE_V=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "CORE"{print $4}')
+                GDR_CORE_A=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "CORE"{print $7}')
+                GDR_CORE_W=$(echo "${rbln_pmic}" | awk '$1 == "GDR" && $2 == "CORE"{print $10}')
+
+                RBLN_PWR=$(rbln pwr -d ${port} | awk '$1 == "Power"{print $7}')
+
+
+                #Write rbln infomation
+                time_end_stamp=$(date +"%S.%3N")
+
+		if (( $(echo "$time_end_stamp > $time_start_stamp" | bc -l) )); then
+                        check_start_time_stamp=$(echo "$time_end_stamp - $time_start_stamp" | bc -l)
+                else
+                        check_start_time_stamp=$(echo "($time_end_stamp+60) - $time_start_stamp" | bc -l)
+                fi
+
+		echo "$time_stamp, $test_num, $host_name, $chip_info, $base_file_name, $host_driver, $fw_release $smc_version, $CA53_temp, $DNC0_temp, $DNC1_temp, $DNC2_temp, $DNC3_temp, $DNC4_temp, $DNC5_temp, $DRAM_temp, $PCIE_temp, $SHM_temp, $DNC_CORE_V, $DNC_CORE_A, $DNC_CORE_W, $PCIEA_V, $PCIEA_A, $PCIEA_W, $GDR_VDDQ_V, $GDR_VDDQ_A, $GDR_VDDQ_W, $GDR_CORE_V, $GDR_CORE_A, $GDR_CORE_W, $check_start_time_stamp, $RBLN_PWR," >> $FILE_PATH1
+
+	    else
+	        touch $FILE_PATH1
+        	echo "time_stamp, test_num, host_name, chip_info, vector_name, host_driver, fw_release, smc_version,CA53_temp, DNC0_temp, DNC1_temp, DNC2_temp, DNC3_temp, DNC4_temp, DNC5_temp, DRAM_temp, PCIE_temp, SHM_temp, DNC_CORE_V, DNC_CORE_A, DNC_CORE_W, PCIEA_V, PCIEA_A, PCIEA_W, GDR_VDDQ_V, GDR_VDDQ_A, GDR_VDDQ_W, GDR_CORE_V, GDR_CORE_A, GDR_CORE_W, exe_time, RBLN_PWR," > $FILE_PATH1
+                echo "$chip_info // File create."
+ 	    fi	
+
+        done
+	sleep 0.1
+        echo "Waiting for start_test function to finish..."
+    done
+    for port in "${NUMBERS[@]}"; do
+        echo "ID: $port"
+        chip_info=$(rbln chip_info -d ${port} | awk '$1 == "Chip" {print $3}')
+        FILE_PATH1="./result/${chip_info}_${test_num}_mda_test_log.csv"
+        FILE_PATH2="/home/jenkins/www/test_log/mda/${test_num}_${host_name}_${chip_info}_test_log.csv"    
+        #echo $(scp $FILE_PATH1 root@192.168.49.200:$FILE_PATH2)
+    done
+
+}
+
+
+
+analysis_log(){
+    local NPU_ID_LIST=$1
+    local file_name=$2
+    base_file_name=$(basename "$file_name")
+    log_file=${log_path}/${host_name}_${test_num}_execution_log_${LOG_SDATE}_${base_file_name}_${NPU_ID_LIST}.log
+    cvs_file=${log_path}/${host_name}_${test_num}_data_log_${LOG_SDATE}_${base_file_name}_${NPU_ID_LIST}.cvs
+
+    echo "log file name is $log_file"
+    echo "cvs file name is $cvs_file"
+    if [ -e $log_file ]; then
+        echo "file exist"
+        test_result=$(grep 'Report' $log_file | awk '{print $2}' | awk -F '(' '{print $1}')
+        waited_avg_time=$(grep 'waited functions' $log_file | awk '{if ($6 != "0.00") print $6}')
+        called_avg_time=$(grep 'called functions' $log_file | awk '{if ($6 != "0.00") print $6}')
+        echo "test_result = $test_result   /  waited_avg_time = $waited_avg_time / called_avg_time = $called_avg_time"
+        echo "No,waited,called,report_passed,average_us" > $cvs_file
+
+        awk -v report_passed="$test_result" -v average_us="$waited_avg_time" -v called_us="$called_avg_time" '
+            /Perf \(waited inferences\)/ {
+                no = $6
+                waited_perf = $8
+                getline
+                called_perf = $8
+                print no "," waited_perf "," called_perf "," report_passed "," average_us
+            }
+        ' $log_file >> $cvs_file
+
+        echo "CSV file generated at $cvs_file"
+        python3 ./tests/plot.py "$cvs_file" "$waited_avg_time" "$called_avg_time"
+
+    else
+        echo "file None"
+    fi
+}
+
+start_mda_test() {
+    local NPU_ID_LIST=$1
+    local file_name=$2
+    base_file_name=$(basename "$file_name")	
+    echo "RBLNTHUNK_PERF=2 ./tests/rblntrace retrace $NPU_ID_LIST $file_name"
+    log_file=${log_path}/${host_name}_${test_num}_execution_log_${LOG_SDATE}_${base_file_name}_${NPU_ID_LIST}.log
+    RBLNTHUNK_PERF=2 ./tests/rblntrace retrace $NPU_ID_LIST $file_name > $log_file
+}
+
+
+execute_script() {
+    local stage=$1
+    local file_name=$2
+
+    echo "execute_script file name is $file_name"
+    if [[ "$file_name" == *"13b_"* || "$file_name" == *"solar_"* ]]; then	
+	echo "llama13b"
+        case $stage in
+	    "8mda")
+                start_mda_test "--npu_id_list=0,1,2,3,4,5,6,7" $file_name &
+		pid1=$!
+		data_loging "--npu_id_list=0,1,2,3,4,5,6,7" $file_name $pid1 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3,4,5,6,7" $file_name
+                ;;
+            "16mda")
+                start_mda_test "--npu_id_list=0,1,2,3,4,5,6,7" $file_name &
+		pid1=$!
+		data_loging "--npu_id_list=0,1,2,3,4,5,6,7" $file_name $pid1 &
+                start_mda_test "--npu_id_list=8,9,10,11,12,13,14,15" $file_name &
+		pid2=$!
+		data_loging "--npu_id_list=8,9,10,11,12,13,14,15" $file_name $pid2 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3,4,5,6,7" $file_name &
+		analysis_log "--npu_id_list=8,9,10,11,12,13,14,15" $file_name &
+                ;;
+        esac
+    elif [[ "$file_name" == *"7b_"* || "$file_name" == *"8b_"* ]]; then
+	echo "llama7b & 8b"
+        case $stage in
+            "4mda")
+		echo "case execution 4ma"
+                start_mda_test "--npu_id_list=0,1,2,3" $file_name &
+		pid1=$!
+                data_loging "--npu_id_list=0,1,2,3" $file_name $pid1 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3" $file_name &
+
+                ;;
+            "8mda")
+	        echo "case execution 8ma"
+                start_mda_test "--npu_id_list=0,1,2,3" $file_name &
+		pid1=$!
+                data_loging "--npu_id_list=0,1,2,3" $file_name $pid1 &
+                start_mda_test "--npu_id_list=4,5,6,7" $file_name &
+		pid2=$!
+                data_loging "--npu_id_list=4,5,6,7" $file_name $pid2 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3" $file_name &
+		analysis_log "--npu_id_list=4,5,6,7" $file_name &
+                ;;
+            "12mda")
+		echo "case execution 12ma"
+                start_mda_test "--npu_id_list=0,1,2,3" $file_name &
+		pid1=$!
+                data_loging "--npu_id_list=0,1,2,3" $file_name $pid1 &
+                start_mda_test "--npu_id_list=4,5,6,7" $file_name &
+		pid2=$!
+                data_loging "--npu_id_list=4,5,6,7" $file_name $pid2 &
+                start_mda_test "--npu_id_list=8,9,10,11" $file_name &
+		pid3=$!
+                data_loging "--npu_id_list=8,9,10,11" $file_name $pid3 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3" $file_name &
+                analysis_log "--npu_id_list=4,5,6,7" $file_name &
+                analysis_log "--npu_id_list=8,9,10,11" $file_name &
+		;;
+            "16mda")
+		echo "case execution 16ma"
+                start_mda_test "--npu_id_list=0,1,2,3" $file_name &
+		pid1=$!
+                data_loging "--npu_id_list=0,1,2,3" $file_name $pid1 &
+                start_mda_test "--npu_id_list=4,5,6,7" $file_name &
+		pid2=$!
+                data_loging "--npu_id_list=4,5,6,7" $file_name $pid2 &
+                start_mda_test "--npu_id_list=8,9,10,11" $file_name &
+		pid3=$!
+                data_loging "--npu_id_list=8,9,10,11" $file_name $pid3 &
+                start_mda_test "--npu_id_list=12,13,14,15" $file_name &
+		pid4=$!
+                data_loging "--npu_id_list=12,13,14,15" $file_name $pid4 &
+		wait
+		analysis_log "--npu_id_list=0,1,2,3" $file_name &
+                analysis_log "--npu_id_list=4,5,6,7" $file_name &
+                analysis_log "--npu_id_list=8,9,10,11" $file_name &
+                analysis_log "--npu_id_list=12,13,14,15" $file_name &
+                ;;
+        esac
+    else
+        echo "Unsupported file type"
+    fi
+}
+
+
+for ((z=0; z < $MDA_FILE_NUM; z++)); do
+    FILE_NAME=${MDA_FILE[$z]}
+    echo "File name is $FILE_NAME"
+    execute_script $stage $FILE_NAME
+    sleep 10
+done
+file_name_filter=${host_name}_${test_num}_data_log_${LOG_SDATE}
+python3 ./tests/total_plot.py "$file_name_filter"
